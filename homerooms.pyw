@@ -28,6 +28,8 @@ print(f"Username: {un} |Password: {pw} |Server: {cs}")  # debug so we can see wh
 print(f"SFTP Username: {sftpUN} |SFTP Password: {sftpPW} |SFTP Server: {sftpHOST}")  # debug so we can see what credentials are being used
 badnames = ['use','test','teststudent','test student','testtt','testt','testtest']
 
+IGNORED_CLASS_NUMS = ["CHR", "IREADY"]  # class numbers that should be ignored
+
 if __name__ == '__main__':  # main file execution
 	with oracledb.connect(user=un, password=pw, dsn=cs) as con:  # create the connecton to the database
 		with con.cursor() as cur:  # start an entry cursor
@@ -90,7 +92,7 @@ if __name__ == '__main__':  # main file execution
 												if courses:  # only overwrite the homeroom if there is actually data in the response (skips students with no enrollments)
 													for course in courses:
 														courseNum = str(course[0])  # course "numbers" are just text
-														if (courseNum != "CHR" and courseNum != "IREADY"):  # check for some extra classes that pre-k students have and classes that have HR in the name to filter them out
+														if courseNum not in IGNORED_CLASS_NUMS:  # check for some extra classes that pre-k students have and classes that have HR in the name to filter them out
 															teacherID = str(course[1])  # store the unique id of the teacher
 															sectionID = str(course[2])  # store the unique id of the section, used to get classroom number later
 															# print(f'DBUG: Found good class for {idNum}: {courseNum} tought by {teacherID}', file=log) # debug
