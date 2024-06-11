@@ -72,7 +72,7 @@ if __name__ == '__main__':  # main file execution
 											for term in terms:  # go through every term
 												termStart = term[1]
 												termEnd = term[2]
-												if ((termStart - timedelta(days = 14) < today) and (termEnd + timedelta(days = 14) > today)):  # compare todays date to the start and end dates with 2 week leeway so it populates before the first day of school
+												if ((termStart - timedelta(days = 21) < today) and (termEnd + timedelta(days = 60) > today)):  # compare todays date to the start and end dates with 3 week leeway before school so it populates before the first day of school. 2 month leeway at the end of the term should cover most of the summer
 													termid = str(term[0])
 													termDCID = str(term[4])
 													# print(f'DBUG: {idNum} has good term for school {schoolID}: {termid} | {termDCID}')
@@ -80,46 +80,50 @@ if __name__ == '__main__':  # main file execution
 										except Exception as er:
 											print(f'ERROR getting term for {idNum} : {er}')
 											print(f'ERROR getting term for {idNum} : {er}', file=log)
+										if termid:  # check to see if we found a valid term before we continue
+											try:  # put the course retrieval in its own try/except block
+												if grade < 0:  # if they are a pre-k kid, we just take whatever course they are enrolled in
+													cur.execute("SELECT course_number, teacherid, sectionid FROM cc WHERE studentid = :studentid AND termid = :term ORDER BY course_number", studentid=internalID, term=termid)
+												else:  # for k-12, we want to search for a HR section
+													cur.execute("SELECT course_number, teacherid, sectionid FROM cc WHERE instr(course_number, 'HR') > 0 AND studentid = :studentid AND termid = :term ORDER BY course_number", studentid=internalID, term=termid)  # instr() filters to results that have HR in the course_number column
+												courses = cur.fetchall()
+												if courses:  # only overwrite the homeroom if there is actually data in the response (skips students with no enrollments)
+													for course in courses:
+														courseNum = str(course[0])  # course "numbers" are just text
+														if (courseNum != "CHR" and courseNum != "IREADY"):  # check for some extra classes that pre-k students have and classes that have HR in the name to filter them out
+															teacherID = str(course[1])  # store the unique id of the teacher
+															sectionID = str(course[2])  # store the unique id of the section, used to get classroom number later
+															# print(f'DBUG: Found good class for {idNum}: {courseNum} tought by {teacherID}', file=log) # debug
+														# else: # debug
+															# print(f'DBUG: Found "bad" class for {idNum}: {courseNum}', file=log) # debug
+													try:  # put teacher and room info in its own try/except block
+														# once we have gotten the section info for the homeroom, need to get the teacher name
+														cur.execute("SELECT users.lastfirst FROM schoolstaff LEFT JOIN users ON schoolstaff.users_dcid = users.dcid WHERE schoolstaff.id = :staffid", staffid=teacherID)
+														teachers = cur.fetchall()  # there should really only be one row, so don't bother doing a loop and just take the first result
+														homeroom = str(teachers[0][0])  # store the lastfirst into homeroom
+														# now that we found the homeroom and teacher name, also get the room number
+														cur.execute("SELECT room FROM sections WHERE id = :sectionid", sectionid=sectionID)  # get the room number assigned to the sectionid correlating to our home_room
+														rooms = cur.fetchall()
+														homeroom_number = str(rooms[0][0])
 
-										try:  # put the course retrieval in its own try/except block
-											if grade < 0:  # if they are a pre-k kid, we just take whatever course they are enrolled in
-												cur.execute("SELECT course_number, teacherid, sectionid FROM cc WHERE studentid = :studentid AND termid = :term ORDER BY course_number", studentid=internalID, term=termid)
-											else:  # for k-12, we want to search for a HR section
-												cur.execute("SELECT course_number, teacherid, sectionid FROM cc WHERE instr(course_number, 'HR') > 0 AND studentid = :studentid AND termid = :term ORDER BY course_number", studentid=internalID, term=termid)  # instr() filters to results that have HR in the course_number column
-											courses = cur.fetchall()
-											if courses:  # only overwrite the homeroom if there is actually data in the response (skips students with no enrollments)
-												for course in courses:
-													courseNum = str(course[0])  # course "numbers" are just text
-													if (courseNum != "CHR" and courseNum != "IREADY"):  # check for some extra classes that pre-k students have and classes that have HR in the name to filter them out
-														teacherID = str(course[1])  # store the unique id of the teacher
-														sectionID = str(course[2])  # store the unique id of the section, used to get classroom number later
-														# print(f'DBUG: Found good class for {idNum}: {courseNum} tought by {teacherID}', file=log) # debug
-													# else: # debug
-														# print(f'DBUG: Found "bad" class for {idNum}: {courseNum}', file=log) # debug
-												try:  # put teacher and room info in its own try/except block
-													# once we have gotten the section info for the homeroom, need to get the teacher name
-													cur.execute("SELECT users.lastfirst FROM schoolstaff LEFT JOIN users ON schoolstaff.users_dcid = users.dcid WHERE schoolstaff.id = :staffid", staffid=teacherID)
-													teachers = cur.fetchall()  # there should really only be one row, so don't bother doing a loop and just take the first result
-													homeroom = str(teachers[0][0])  # store the lastfirst into homeroom
-													# now that we found the homeroom and teacher name, also get the room number
-													cur.execute("SELECT room FROM sections WHERE id = :sectionid", sectionid=sectionID)  # get the room number assigned to the sectionid correlating to our home_room
-													rooms = cur.fetchall()
-													homeroom_number = str(rooms[0][0])
+														cur.execute("SELECT homeroom_number FROM u_studentsuserfields WHERE studentsdcid = :studentsdcid", studentsdcid=stuDCID)  # fetch their current homeroom room number for comparison
+														oldRoomNumber = cur.fetchall()
+														currentHomeroom_number = str(oldRoomNumber[0][0]) if oldRoomNumber[0][0] else ""  # if there is no result/null for their current homeroom room number, just set it to a blank
 
-													cur.execute("SELECT homeroom_number FROM u_studentsuserfields WHERE studentsdcid = :studentsdcid", studentsdcid=stuDCID)  # fetch their current homeroom room number for comparison
-													oldRoomNumber = cur.fetchall()
-													currentHomeroom_number = str(oldRoomNumber[0][0]) if oldRoomNumber[0][0] else ""  # if there is no result/null for their current homeroom room number, just set it to a blank
+													except Exception as er:
+														print(f'ERROR getting teacher or room number for student {idNum}: {er}')
+														print(f'ERROR getting teacher or room number for student {idNum}: {er}',file=log)
 
-												except Exception as er:
-													print(f'ERROR getting teacher or room number for student {idNum}: {er}')
-													print(f'ERROR getting teacher or room number for student {idNum}: {er}',file=log)
+													# print main info as a log line so we can go back and look easily
+													print(f'INFO: Student ID: {idNum} | Course Number: {courseNum} | Teacher ID: {teacherID} | Section ID: {sectionID} | Teacher Name: {homeroom} | Room Number: {homeroom_number}', file=log)
 
-												# print main info as a log line so we can go back and look easily
-												print(f'INFO: Student ID: {idNum} | Course Number: {courseNum} | Teacher ID: {teacherID} | Section ID: {sectionID} | Teacher Name: {homeroom} | Room Number: {homeroom_number}', file=log)
+											except Exception as er:
+												print(f'ERROR getting courses for {idNum} : {er}')
+												print(f'ERROR getting courses for {idNum} : {er}', file=log)
+										else:  # if we did not find a valid term, just print out a warning
+											print(f'WARN: Could not find a valid term for todays date of {today}, skipping student')
+											print(f'WARN: Could not find a valid term for todays date of {today}, skipping student', file=log)
 
-										except Exception as er:
-											print(f'ERROR getting courses for {idNum} : {er}')
-											print(f'ERROR getting courses for {idNum} : {er}', file=log)
 
 									# give some log info if their homeroom changed from what it currently is
 									if homeroom != currentHomeroom:
@@ -171,5 +175,3 @@ if __name__ == '__main__':  # main file execution
 				endTime = endTime.strftime('%H:%M:%S')
 				print(f'INFO: Execution ended at {endTime}')
 				print(f'INFO: Execution ended at {endTime}', file=log)
-
-
