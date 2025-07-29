@@ -68,6 +68,7 @@ if __name__ == '__main__':  # main file execution
 
 									if(status == 0):  # only worry about the students who are active, otherwise wipe out their homeroom as the homeroom and homeroom_number remain blank
 										try:
+											termid = None  # set to None by default until we can find a valid term
 											# get a list of terms for the school, filtering to only full years
 											cur.execute("SELECT id, firstday, lastday, schoolid, dcid FROM terms WHERE IsYearRec = 1 AND schoolid = :schoolid ORDER BY dcid DESC", schoolid=schoolID)  # using bind variables as best practice https://python-oracledb.readthedocs.io/en/latest/user_guide/bind.html#bind
 											terms = cur.fetchall()
@@ -123,8 +124,8 @@ if __name__ == '__main__':  # main file execution
 												print(f'ERROR getting courses for {idNum} : {er}')
 												print(f'ERROR getting courses for {idNum} : {er}', file=log)
 										else:  # if we did not find a valid term, just print out a warning
-											print(f'WARN: Could not find a valid term for todays date of {today}, skipping student')
-											print(f'WARN: Could not find a valid term for todays date of {today}, skipping student', file=log)
+											print(f'WARN: Could not find a valid term for todays date of {today}, skipping student {idNum}')
+											print(f'WARN: Could not find a valid term for todays date of {today}, skipping student {idNum}', file=log)
 
 
 									# give some log info if their homeroom changed from what it currently is
