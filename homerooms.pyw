@@ -127,7 +127,6 @@ if __name__ == '__main__':  # main file execution
 											print(f'WARN: Could not find a valid term for todays date of {today}, skipping student {idNum}')
 											print(f'WARN: Could not find a valid term for todays date of {today}, skipping student {idNum}', file=log)
 
-
 									# give some log info if their homeroom changed from what it currently is
 									if homeroom != currentHomeroom:
 										if currentHomeroom == "":
@@ -137,8 +136,8 @@ if __name__ == '__main__':  # main file execution
 											print(f'WARN: Student {idNum}\'s homeroom changed from {currentHomeroom} to {homeroom}')
 											print(f'WARN: Student {idNum}\'s homeroom changed from {currentHomeroom} to {homeroom}', file=log)
 
-									if homeroom != currentHomeroom:
-										if currentHomeroom == "":
+									if homeroom_number != currentHomeroom_number:
+										if currentHomeroom_number == "":
 											print(f'WARN: Student {idNum} has a new homeroom number when they previously had none - {homeroom_number}')
 											print(f'WARN: Student {idNum} has a new homeroom number when they previously had none - {homeroom_number}', file=log)
 										else:
@@ -146,7 +145,8 @@ if __name__ == '__main__':  # main file execution
 											print(f'WARN: Student {idNum}\'s homeroom number changed from {currentHomeroom_number} to {homeroom_number}', file=log)
 
 									print(f'{idNum}\t{homeroom}\t{homeroom_number}')
-									print(f'{idNum}\t{homeroom}\t{homeroom_number}',file=outputfile)  # do the actual output to the file, tab delimited
+									if (homeroom != currentHomeroom) or (homeroom_number != currentHomeroom_number):  # only output them if something has changed
+										print(f'{idNum}\t{homeroom}\t{homeroom_number}',file=outputfile)  # do the actual output to the file, tab delimited
 
 							except Exception as er:
 								print(f'ERROR: General student error on {idNum}: {er}')
