@@ -47,7 +47,8 @@ if __name__ == '__main__':  # main file execution
 						cur.execute('SELECT student_number, first_name, last_name, id, schoolid, enroll_status, home_room, grade_level, dcid FROM students ORDER BY student_number DESC')
 						students = cur.fetchall()  # fetchall() is used to fetch all records from result set and store the data from the query into the rows variable
 						today = datetime.now()  # get todays date and store it for finding the correct term later
-						# print("today = " + str(today)) # debug
+						# today = today - timedelta(days=1)  # used for testing other dates
+						# print("today = " + str(today), file=log) # debug
 
 						for student in students:  # go through each entry in the students result.
 							try:
@@ -67,11 +68,15 @@ if __name__ == '__main__':  # main file execution
 									stuDCID = str(student[8])
 
 									if(status == 0):  # only worry about the students who are active, otherwise wipe out their homeroom as the homeroom and homeroom_number remain blank
+										termid = None  # set to None by default until we can find a valid term
 										try:
-											termid = None  # set to None by default until we can find a valid term
-											# get a list of terms for the school, filtering to only full years
-											cur.execute("SELECT id, firstday, lastday, schoolid, dcid FROM terms WHERE IsYearRec = 1 AND schoolid = :schoolid ORDER BY dcid DESC", schoolid=schoolID)  # using bind variables as best practice https://python-oracledb.readthedocs.io/en/latest/user_guide/bind.html#bind
-											terms = cur.fetchall()
+											try:
+												# get a list of terms for the school, filtering to only full years
+												cur.execute("SELECT id, firstday, lastday, schoolid, dcid FROM terms WHERE IsYearRec = 1 AND schoolid = :schoolid ORDER BY dcid DESC", schoolid=schoolID)  # using bind variables as best practice https://python-oracledb.readthedocs.io/en/latest/user_guide/bind.html#bind
+												terms = cur.fetchall()
+											except Exception as er:
+												print(f'ERROR getting results of term query for {idNum}: {er}')
+												print(f'ERROR getting results of term query for {idNum}: {er}', file=log)
 											for term in terms:  # go through every term
 												termStart = term[1]
 												termEnd = term[2]
