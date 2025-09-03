@@ -9,6 +9,7 @@ needs pysftp: pip install pysftp --upgrade
 # importing module
 import datetime  # needed to get current date to check what term we are in
 import os  # needed to get environment variables
+import sys
 from datetime import *
 
 import oracledb  # needed for connection to PowerSchool (oracle database)
@@ -41,10 +42,11 @@ if __name__ == '__main__':  # main file execution
 					print(f'INFO: Execution started at {startTime}', file=log)
 					print("Connection established: " + con.version)
 					# print('ID\tHomeroom\tHomeroom Numbers', file=outputfile) # print header line in output file
-
+					
 					try:
+						termDict = {}  # make an empty dict that will store building to termid mappings so we don't need to query every time
 						# get all students in PowerSchool
-						cur.execute('SELECT student_number, first_name, last_name, id, schoolid, enroll_status, home_room, grade_level, dcid FROM students ORDER BY student_number DESC')
+						cur.execute('SELECT s.student_number, s.first_name, s.last_name, s.id, s.schoolid, s.enroll_status, s.home_room, s.grade_level, s.dcid, suf.homeroom_number FROM students s LEFT JOIN u_studentsuserfields suf ON s.dcid = suf.studentsdcid ORDER BY student_number DESC')
 						students = cur.fetchall()  # fetchall() is used to fetch all records from result set and store the data from the query into the rows variable
 						today = datetime.now()  # get todays date and store it for finding the correct term later
 						# today = today - timedelta(days=1)  # used for testing other dates
@@ -63,37 +65,50 @@ if __name__ == '__main__':  # main file execution
 									schoolID = str(student[4])
 									status = int(student[5])  # active on 0 , inactive 1 or 2, 3 for graduated
 									currentHomeroom = str(student[6]) if student[6] else ""
-									currentHomeroom_number = ""  # set current homeroom number to blank just for strange edge cases. If they have are active and have one it will be updated later
+									# currentHomeroom_number = ""  # set current homeroom number to blank just for strange edge cases. If they have are active and have one it will be updated later
 									grade = int(student[7])
 									stuDCID = str(student[8])
+									currentHomeroom_number = str(student[9]) if student[9] else ""
 
 									if(status == 0):  # only worry about the students who are active, otherwise wipe out their homeroom as the homeroom and homeroom_number remain blank
 										termid = None  # set to None by default until we can find a valid term
 										try:
-											try:
-												# get a list of terms for the school, filtering to only full years
-												cur.execute("SELECT id, firstday, lastday, schoolid, dcid FROM terms WHERE IsYearRec = 1 AND schoolid = :schoolid ORDER BY dcid DESC", schoolid=schoolID)  # using bind variables as best practice https://python-oracledb.readthedocs.io/en/latest/user_guide/bind.html#bind
-												terms = cur.fetchall()
-											except Exception as er:
-												print(f'ERROR getting results of term query for {idNum}: {er}')
-												print(f'ERROR getting results of term query for {idNum}: {er}', file=log)
-											for term in terms:  # go through every term
-												termStart = term[1]
-												termEnd = term[2]
-												if ((termStart - timedelta(days = 21) < today) and (termEnd + timedelta(days = 60) > today)):  # compare todays date to the start and end dates with 3 week leeway before school so it populates before the first day of school. 2 month leeway at the end of the term should cover most of the summer
-													termid = str(term[0])
-													termDCID = str(term[4])
-													# print(f'DBUG: {idNum} has good term for school {schoolID}: {termid} | {termDCID}')
-													# print(f'DBUG: {idNum} has good term for school {schoolID}: {termid} | {termDCID}', file=log)
+											if not termDict.get(schoolID, None):  # if we return a none for a query of the term for that building
+												print(f'DBUG: Could not find existing current term for building {schoolID}, doing a query', file=log)
+												try:
+													# get a list of terms for the school, filtering to only full years
+													cur.execute("SELECT id, firstday, lastday, schoolid, dcid FROM terms WHERE IsYearRec = 1 AND schoolid = :schoolid ORDER BY dcid DESC", schoolid=schoolID)  # using bind variables as best practice https://python-oracledb.readthedocs.io/en/latest/user_guide/bind.html#bind
+													terms = cur.fetchall()
+												except Exception as er:
+													print(f'ERROR getting results of term query for {idNum}, skipping student!: {er}')
+													print(f'ERROR getting results of term query for {idNum}, skipping student!: {er}', file=log)
+													break  # skip the rest of the student and do not output anything for them. Temporary until I can figure out what is giving the errors leading to no homerooms
+												for term in terms:  # go through every term
+													termStart = term[1]
+													termEnd = term[2]
+													if ((termStart - timedelta(days = 21) < today) and (termEnd + timedelta(days = 60) > today)):  # compare todays date to the start and end dates with 3 week leeway before school so it populates before the first day of school. 2 month leeway at the end of the term should cover most of the summer
+														termid = str(term[0])
+														termDCID = str(term[4])
+														termDict.update({schoolID : termid})  # add our school : term item to the dictionary
+														# print(f'DBUG: {idNum} has good term for school {schoolID}: {termid} | {termDCID}')
+														# print(f'DBUG: {idNum} has good term for school {schoolID}: {termid} | {termDCID}', file=log)
+											else:
+												termid = termDict.get(schoolID, None)  # get the termid for the building from the dict
+											# print(f'DBUG: Current termid - {termid} | Current term dict - {termDict}', file=log)  # debug
 										except Exception as er:
-											print(f'ERROR getting term for {idNum} : {er}')
-											print(f'ERROR getting term for {idNum} : {er}', file=log)
+											print(f'ERROR getting term for {idNum}, skipping student!: {er}')
+											print(f'ERROR getting term for {idNum}, skipping student!: {er}', file=log)
+											break  # skip the rest of the student and do not output anything for them. Temporary until I can figure out what is giving the errors leading to no homerooms
 										if termid:  # check to see if we found a valid term before we continue
 											try:  # put the course retrieval in its own try/except block
 												if grade < 0:  # if they are a pre-k kid, we just take whatever course they are enrolled in
-													cur.execute("SELECT course_number, teacherid, sectionid FROM cc WHERE studentid = :studentid AND termid = :term ORDER BY course_number", studentid=internalID, term=termid)
+													cur.execute("SELECT cc.course_number, cc.teacherid, cc.sectionid, sections.room, users.lastfirst\
+						 										FROM cc LEFT JOIN sections ON sections.id = cc.sectionid LEFT JOIN schoolstaff ON schoolstaff.id = cc.teacherid LEFT JOIN users ON schoolstaff.users_dcid = users.dcid\
+						 										WHERE cc.studentid = :studentid AND cc.termid = :term ORDER BY cc.course_number", studentid=internalID, term=termid)
 												else:  # for k-12, we want to search for a HR section
-													cur.execute("SELECT course_number, teacherid, sectionid FROM cc WHERE instr(course_number, 'HR') > 0 AND studentid = :studentid AND termid = :term ORDER BY course_number", studentid=internalID, term=termid)  # instr() filters to results that have HR in the course_number column
+													cur.execute("SELECT cc.course_number, cc.teacherid, cc.sectionid, sections.room, users.lastfirst\
+						 										FROM cc LEFT JOIN sections ON sections.id = cc.sectionid LEFT JOIN schoolstaff ON schoolstaff.id = cc.teacherid LEFT JOIN users ON schoolstaff.users_dcid = users.dcid\
+						 										WHERE instr(cc.course_number, 'HR') > 0 AND cc.studentid = :studentid AND cc.termid = :term ORDER BY cc.course_number", studentid=internalID, term=termid)  # instr() filters to results that have HR in the course_number column
 												courses = cur.fetchall()
 												if courses:  # only overwrite the homeroom if there is actually data in the response (skips students with no enrollments)
 													for course in courses:
@@ -101,26 +116,11 @@ if __name__ == '__main__':  # main file execution
 														if courseNum not in IGNORED_CLASS_NUMS:  # check for some extra classes that pre-k students have and classes that have HR in the name to filter them out
 															teacherID = str(course[1])  # store the unique id of the teacher
 															sectionID = str(course[2])  # store the unique id of the section, used to get classroom number later
-															# print(f'DBUG: Found good class for {idNum}: {courseNum} tought by {teacherID}', file=log) # debug
+															homeroom_number = str(course[3])
+															homeroom = str(course[4])
+															# print(f'DBUG: Found good class for {idNum}: {courseNum} taught by {teacherID} - {homeroom} in room {homeroom_number}', file=log) # debug
 														# else: # debug
 															# print(f'DBUG: Found "bad" class for {idNum}: {courseNum}', file=log) # debug
-													try:  # put teacher and room info in its own try/except block
-														# once we have gotten the section info for the homeroom, need to get the teacher name
-														cur.execute("SELECT users.lastfirst FROM schoolstaff LEFT JOIN users ON schoolstaff.users_dcid = users.dcid WHERE schoolstaff.id = :staffid", staffid=teacherID)
-														teachers = cur.fetchall()  # there should really only be one row, so don't bother doing a loop and just take the first result
-														homeroom = str(teachers[0][0])  # store the lastfirst into homeroom
-														# now that we found the homeroom and teacher name, also get the room number
-														cur.execute("SELECT room FROM sections WHERE id = :sectionid", sectionid=sectionID)  # get the room number assigned to the sectionid correlating to our home_room
-														rooms = cur.fetchall()
-														homeroom_number = str(rooms[0][0])
-
-														cur.execute("SELECT homeroom_number FROM u_studentsuserfields WHERE studentsdcid = :studentsdcid", studentsdcid=stuDCID)  # fetch their current homeroom room number for comparison
-														oldRoomNumber = cur.fetchall()
-														currentHomeroom_number = str(oldRoomNumber[0][0]) if oldRoomNumber[0][0] else ""  # if there is no result/null for their current homeroom room number, just set it to a blank
-
-													except Exception as er:
-														print(f'ERROR getting teacher or room number for student {idNum}: {er}')
-														print(f'ERROR getting teacher or room number for student {idNum}: {er}',file=log)
 
 													# print main info as a log line so we can go back and look easily
 													print(f'INFO: Student ID: {idNum} | Course Number: {courseNum} | Teacher ID: {teacherID} | Section ID: {sectionID} | Teacher Name: {homeroom} | Room Number: {homeroom_number}', file=log)
@@ -128,6 +128,7 @@ if __name__ == '__main__':  # main file execution
 											except Exception as er:
 												print(f'ERROR getting courses for {idNum} : {er}')
 												print(f'ERROR getting courses for {idNum} : {er}', file=log)
+												break  # skip the rest of the loop for that student, don't output anything
 										else:  # if we did not find a valid term, just print out a warning
 											print(f'WARN: Could not find a valid term for todays date of {today}, skipping student {idNum}')
 											print(f'WARN: Could not find a valid term for todays date of {today}, skipping student {idNum}', file=log)
@@ -161,6 +162,7 @@ if __name__ == '__main__':  # main file execution
 					except Exception as er:
 						print(f'ERROR: General program error: {er}')
 						print(f'ERROR: General program error: {er}', file=log)
+						sys.exit(1)  # end the execution of the whole program
 
 				try:
 					# after all the output file is done writing and now closed, open an sftp connection to the server and place the file on there
